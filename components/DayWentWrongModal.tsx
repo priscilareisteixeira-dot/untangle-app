@@ -1,91 +1,52 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { rebuildDay } from "@/lib/anthropic";
-import { isPremium, FREE_LIMITS } from "@/lib/limits";
-import { getTodayUsageCount } from "@/lib/usage";
+"use client";
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-function tomorrowStr() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
+import { useState } from "react";
+import Link from "next/link";
 
-export async function POST(request: Request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+type Decision = { title: string; action: string; note: string };
 
-  if (!user) {
-    return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  }
+export default function DayWentWrongModal({
+  onClose,
+  onApplied,
+}: {
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [limitReached, setLimitReached] = useState(false);
+  const [decisions, setDecisions] = useState<Decision[] | null>(null);
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("subscription_status")
-    .eq("id", user.id)
-    .single();
-
-  const premium = isPremium(profile?.subscription_status);
-
-  if (!premium) {
-    const usedToday = await getTodayUsageCount(supabase, user.id, "day_went_wrong");
-    if (usedToday >= FREE_LIMITS.dayWentWrongPerDay) {
-      return NextResponse.json(
-        {
-          error: "You've used today's free re-plan. Upgrade for unlimited.",
-          limitReached: true,
-        },
-        { status: 403 }
-      );
+  async function submit() {
+    if (!text.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ai/day-went-wrong", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ whatHappened: text }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Something went wrong.");
+        setLimitReached(!!data.limitReached);
+      } else {
+        setDecisions(data.decisions);
+        onApplied();
+      }
+    } catch {
+      setError("Network error — please try again.");
     }
+    setLoading(false);
   }
 
-  const { whatHappened } = await request.json();
-  if (!whatHappened || typeof whatHappened !== "string" || !whatHappened.trim()) {
-    return NextResponse.json({ error: "Tell me what happened" }, { status: 400 });
-  }
+  const actionLabel: Record<string, string> = {
+    keep_today: "Kept today",
+    move_tomorrow: "Moved to tomorrow",
+    drop: "Saved for later",
+  };
 
-  const { data: remaining } = await supabase
-    .from("tasks")
-    .select("id, title, duration_minutes, priority")
-    .eq("user_id", user.id)
-    .eq("status", "today")
-    .eq("date", todayStr())
-    .eq("completed", false);
-
-  const decisions = await rebuildDay(
-    whatHappened.trim(),
-    (remaining || []).map((t: { id: string; title: string; duration_minutes: number; priority: string }) => ({
-      title: t.title,
-      duration: t.duration_minutes,
-      priority: t.priority,
-    }))
-  );
-
-  if (!decisions) {
-    return NextResponse.json({ error: "Couldn't re-plan — please try again" }, { status: 502 });
-  }
-
-  // Apply the AI's decisions directly to the database.
-  const byTitle = new Map(
-    (remaining || []).map((t: { id: string; title: string }) => [t.title, t.id])
-  );
-  for (const d of decisions) {
-    const taskId = byTitle.get(d.title);
-    if (!taskId) continue;
-    if (d.action === "move_tomorrow") {
-      await supabase.from("tasks").update({ date: tomorrowStr(), scheduled_minutes: null }).eq("id", taskId);
-    } else if (d.action === "drop") {
-      await supabase.from("tasks").update({ status: "backlog", date: null, scheduled_minutes: null }).eq("id", taskId);
-    }
-    // "keep_today" needs no change.
-  }
-
-  await supabase.from("usage_events").insert({ user_id: user.id, event_type: "day_went_wrong" });
-
-  return NextResponse.json({ decisions });
-}
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center">
