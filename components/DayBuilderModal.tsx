@@ -1,62 +1,23 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { buildDayPlan } from "@/lib/anthropic";
-import { isPremium } from "@/lib/limits";
-
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-export async function POST(request: Request) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("subscription_status")
-    .eq("id", user.id)
-    .single();
-
-  if (!isPremium(profile?.subscription_status)) {
-    return NextResponse.json(
-      { error: "AI Day Builder is a Premium feature.", upgradeRequired: true },
-      { status: 403 }
-    );
-  }
-
-  const { context } = await request.json();
-  if (!context || typeof context !== "string" || !context.trim()) {
-    return NextResponse.json({ error: "Tell me what you've got to work with" }, { status: 400 });
-  }
-
-  const { data: pendingTasks } = await supabase
-    .from("tasks")
-    .select("title, duration_minutes, priority")
-    .eq("user_id", user.id)
-    .eq("status", "today")
-    .eq("date", todayStr())
-    .eq("completed", false);
-
-  const schedule = await buildDayPlan(
-    context.trim(),
-    (pendingTasks || []).map((t: { title: string; duration_minutes: number; priority: string }) => ({
-      title: t.title,
-      duration: t.duration_minutes,
-      priority: t.priority,
-    }))
-  );
-
-  if (!schedule) {
-    return NextResponse.json({ error: "Couldn't build a plan — please try again" }, { status: 502 });
-  }
-
-  await supabase.from("usage_events").insert({ user_id: user.id, event_type: "day_builder" });
-
-  return NextResponse.json({ schedule });
-}
+app/
+  login, signup, forgot-password, reset-password/   — auth pages
+  auth/callback/                                     — email confirmation handler
+  paywall/                                            — opt-in upgrade page (not a forced gate)
+  dashboard/                                          — the real app: Home, Today, Planner, Brain Dump, Settings, Insights
+  api/stripe/                                         — checkout, billing portal, webhook
+  api/ai/                                             — organize, breakdown, day-builder, day-went-wrong
+                                                         (all server-side Claude calls, all tier-checked)
+components/
+  TaskDetailModal.tsx, FocusMode.tsx                  — task detail, breakdown, focus timer
+  BrainDumpCapture.tsx                                — the core AI loop, tier-aware
+  HabitsSection.tsx, RoutinesSection.tsx              — free/premium habit + routine features
+  DayWentWrongModal.tsx, DayBuilderModal.tsx           — the two premium AI planning features
+lib/
+  supabase/                                           — browser + server Supabase clients
+  stripe.ts, anthropic.ts                             — server-side integrations
+  limits.ts                                           — single source of truth for free vs premium
+  usage.ts                                            — daily usage-limit counting
+middleware.ts                                         — the security boundary: just auth now, not subscription
+                                                         (premium gating happens per-feature in the API routes instead)
+supabase/migrations/
+  0001_init.sql                                       — accounts, tasks, brain dumps, usage — run first
+  0002_premium_features.sql                           — habits, routines, completed_at — run second
