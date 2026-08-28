@@ -16,6 +16,8 @@ type OrganizedItem = {
   bucket: Bucket | null;
 };
 
+type IndexedItem = OrganizedItem & { __idx: number };
+
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -126,12 +128,12 @@ export default function BrainDumpCapture({ compact = false }: { compact?: boolea
     router.refresh();
   }
 
-  const grouped: Record<string, OrganizedItem[]> = {};
+  const grouped: Record<string, IndexedItem[]> = {};
   if (items && wasAdvanced) {
     items.forEach((it, idx) => {
       const key = it.bucket || "Other";
       if (!grouped[key]) grouped[key] = [];
-      (grouped[key] as any).push({ ...it, __idx: idx });
+      grouped[key].push({ ...it, __idx: idx });
     });
   }
 
@@ -175,7 +177,7 @@ export default function BrainDumpCapture({ compact = false }: { compact?: boolea
                   <div key={b}>
                     <p className="text-[10px] font-extrabold uppercase text-ink-faint mb-1">{b}</p>
                     <div className="space-y-2">
-                      {(grouped[b] as any[]).map((it) => (
+                      {grouped[b].map((it) => (
                         <div key={it.__idx} className="flex items-center gap-2 bg-paper rounded-xl px-3 py-2.5">
                           <span className="flex-1 text-sm font-bold">{it.title}</span>
                           <button

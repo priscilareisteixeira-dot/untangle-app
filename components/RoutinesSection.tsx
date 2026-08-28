@@ -59,12 +59,14 @@ export default function RoutinesSection({ isPremium }: { isPremium: boolean }) {
       .eq("status", "today")
       .eq("date", todayStr());
 
-    const tasks = (today || []).map((t) => ({
-      title: t.title,
-      category: t.category,
-      priority: t.priority,
-      duration: t.duration_minutes,
-    }));
+    const tasks = (today || []).map(
+      (t: { title: string; category: string; priority: string; duration_minutes: number }) => ({
+        title: t.title,
+        category: t.category,
+        priority: t.priority,
+        duration: t.duration_minutes,
+      })
+    );
 
     await supabase.from("routines").insert({ user_id: user.id, name: newName.trim(), tasks });
     setNewName("");
