@@ -59,7 +59,7 @@ export async function POST(request: Request) {
 
   const decisions = await rebuildDay(
     whatHappened.trim(),
-    (remaining || []).map((t) => ({
+    (remaining || []).map((t: { id: string; title: string; duration_minutes: number; priority: string }) => ({
       title: t.title,
       duration: t.duration_minutes,
       priority: t.priority,
@@ -71,7 +71,9 @@ export async function POST(request: Request) {
   }
 
   // Apply the AI's decisions directly to the database.
-  const byTitle = new Map((remaining || []).map((t) => [t.title, t.id]));
+  const byTitle = new Map(
+    (remaining || []).map((t: { id: string; title: string }) => [t.title, t.id])
+  );
   for (const d of decisions) {
     const taskId = byTitle.get(d.title);
     if (!taskId) continue;
