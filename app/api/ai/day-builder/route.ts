@@ -45,7 +45,7 @@ export async function POST(request: Request) {
 
   const schedule = await buildDayPlan(
     context.trim(),
-    (pendingTasks || []).map((t) => ({
+    (pendingTasks || []).map((t: { title: string; duration_minutes: number; priority: string }) => ({
       title: t.title,
       duration: t.duration_minutes,
       priority: t.priority,
